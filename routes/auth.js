@@ -26,7 +26,6 @@ router.post('/register', async (req, res) => {
   }
 });
 
-// LOGIN
 router.post('/login', async (req, res) => {
   const { email, password } = req.body;
 
@@ -34,8 +33,18 @@ router.post('/login', async (req, res) => {
     const stmt = db.prepare(`SELECT * FROM users WHERE email = ?`);
     const user = stmt.get(email);
 
-    if (!user || !(await bcrypt.compare(password, user.password)))
+    if (!user) {
+      console.log('User not found for email:', email);
       return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    const isPasswordMatch = await bcrypt.compare(password, user.password);
+    if (!isPasswordMatch) {
+      console.log('Password mismatch for user:', user.email);
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+
+    const { password: _, ...userData } = user;
 
     const accessToken = jwt.sign(
       { id: user.user_id, role: user.role },
@@ -51,11 +60,20 @@ router.post('/login', async (req, res) => {
 
     refreshTokens.add(refreshToken);
 
-    res.json({ message: 'Login successful', accessToken, refreshToken });
+    res.json({
+      message: 'Login successful',
+      accessToken,
+      refreshToken,
+      user: userData
+    });
   } catch (err) {
+    console.error('Login error:', err);
+    console.log('JWT_SECRET:', process.env.JWT_SECRET);
+    console.log('JWT_SECRET:', process.env.JWT_REFRESH_SECRET);
     res.status(500).json({ error: 'Login failed' });
   }
 });
+
 
 // REFRESH TOKEN
 router.post('/token', (req, res) => {
