@@ -1,7 +1,7 @@
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-
+const cloudinary = require('../utils/cloudinary');
 const pool = require('../db');
 
 const router = express.Router();
@@ -441,6 +441,12 @@ router.post('/logout', (req, res) => {
   res.json({
     message: 'Logged out'
   });
+});
+
+const multer = require('multer');
+
+const upload = multer({
+  storage: multer.memoryStorage(),
 });
 
 module.exports = router;
