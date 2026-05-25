@@ -12,11 +12,14 @@ const groupsRoutes = require('./routes/groups');
 const notificationRoutes = require('./routes/notifications');
 const resourcesRoutes = require('./routes/resources');
 const hotlinesRoutes = require('./routes/hotlines');
+const multer = require('multer');
+const streamifier = require('streamifier');
+const cloudinary = require('../utils/cloudinary');
 
-const {
-  uploadRouter,
-  createRouteHandler,
-} = require('./utils/uploadthings');
+const upload = multer({
+  storage: multer.memoryStorage(),
+});
+
 
 app.use(cors({
   origin: '*',
@@ -24,13 +27,6 @@ app.use(cors({
 }));
 
 app.use(express.json());
-
-app.use(
-  '/api/uploadthing',
-  createRouteHandler({
-    router: uploadRouter,
-  })
-);
 
 app.use('/api', authRoutes);
 app.use('/api', incidentRoutes);

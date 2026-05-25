@@ -15,44 +15,14 @@ const refreshTokens = new Set();
 // =========================
 // REGISTER
 // =========================
-router.post('/register', async (req, res) => {
-  try {
+router.post(
+  '/register',
+  upload.single('profile_image'),
+  async (req, res) => {
 
-    const {
-      name,
-      email,
-      password,
-      phone_number,
-      role,
-      address,
-      latitude,
-      longitude,
-      profile_image
-    } = req.body;
+    try {
 
-    if (!name || !email || !password) {
-      return res.status(400).json({
-        error: 'Missing required fields'
-      });
-    }
-
-    // Check if email already exists
-    const existingUser = await pool.query(
-      `SELECT user_id FROM users WHERE email = $1`,
-      [email]
-    );
-
-    if (existingUser.rows.length > 0) {
-      return res.status(409).json({
-        error: 'Email already exists'
-      });
-    }
-
-    const hashedPassword = await bcrypt.hash(password, 10);
-
-    const result = await pool.query(`
-      INSERT INTO users
-      (
+      const {
         name,
         email,
         password,
@@ -61,36 +31,92 @@ router.post('/register', async (req, res) => {
         address,
         latitude,
         longitude,
-        profile_image
-      )
-      VALUES
-      ($1,$2,$3,$4,$5,$6,$7,$8,$9)
-      RETURNING user_id
-    `, [
-      name,
-      email,
-      hashedPassword,
-      phone_number || null,
-      role || 'user',
-      address || null,
-      latitude || null,
-      longitude || null,
-      profile_image || null
-    ]);
+      } = req.body;
 
-    res.status(201).json({
-      message: 'User registered successfully',
-      user_id: result.rows[0].user_id
-    });
+      if (!name || !email || !password) {
+        return res.status(400).json({
+          error: 'Missing required fields'
+        });
+      }
 
-  } catch (err) {
-    console.error('Register error:', err);
+      // Check existing email
+      const existingUser = await pool.query(
+        `SELECT user_id FROM users WHERE email = $1`,
+        [email]
+      );
 
-    res.status(500).json({
-      error: 'Registration failed'
-    });
+      if (existingUser.rows.length > 0) {
+        return res.status(409).json({
+          error: 'Email already exists'
+        });
+      }
+
+      // Upload image to Cloudinary
+      let profileImageUrl = null;
+
+      if (req.file) {
+
+        const base64Image =
+          `data:${req.file.mimetype};base64,${req.file.buffer.toString('base64')}`;
+
+        const uploaded = await cloudinary.uploader.upload(
+          base64Image,
+          {
+            folder: 'disaster-management/profile-images',
+          }
+        );
+
+        profileImageUrl = uploaded.secure_url;
+      }
+
+      // Hash password
+      const hashedPassword = await bcrypt.hash(password, 10);
+
+      // Insert user
+      const result = await pool.query(`
+        INSERT INTO users
+        (
+          name,
+          email,
+          password,
+          phone_number,
+          role,
+          address,
+          latitude,
+          longitude,
+          profile_image
+        )
+        VALUES
+        ($1,$2,$3,$4,$5,$6,$7,$8,$9)
+        RETURNING user_id
+      `, [
+        name,
+        email,
+        hashedPassword,
+        phone_number || null,
+        role || 'resident',
+        address || null,
+        latitude || null,
+        longitude || null,
+        profileImageUrl
+      ]);
+
+      res.status(201).json({
+        message: 'User registered successfully',
+        user_id: result.rows[0].user_id,
+        profile_image: profileImageUrl,
+      });
+
+    } catch (err) {
+
+      console.error('Register error:', err);
+
+      res.status(500).json({
+        error: 'Registration failed'
+      });
+    }
   }
-});
+);
 
 
 // =========================
