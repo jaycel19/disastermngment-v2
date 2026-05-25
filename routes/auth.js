@@ -1,105 +1,423 @@
-// auth.js
 const express = require('express');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
-const db = require('../db');
+
+const pool = require('../db');
+
 const router = express.Router();
 
 const ACCESS_TOKEN_SECRET = process.env.JWT_SECRET;
 const REFRESH_TOKEN_SECRET = process.env.JWT_REFRESH_SECRET;
+
 const refreshTokens = new Set();
 
-// REGISTER
-router.post('/register', async (req, res) => {
-  const { name, email, password, phone_number, role } = req.body;
-  const hashedPassword = await bcrypt.hash(password, 10);
 
+// =========================
+// REGISTER
+// =========================
+router.post('/register', async (req, res) => {
   try {
-    const stmt = db.prepare(`
-      INSERT INTO users (name, email, password, phone_number, role)
-      VALUES (?, ?, ?, ?, ?)
-    `);
-    stmt.run(name, email, hashedPassword, phone_number || null, role || 'user');
-    res.status(201).json({ message: 'User registered' });
+
+    const {
+      name,
+      email,
+      password,
+      phone_number,
+      role,
+      address,
+      city,
+      latitude,
+      longitude,
+      profile_image
+    } = req.body;
+
+    if (!name || !email || !password) {
+      return res.status(400).json({
+        error: 'Missing required fields'
+      });
+    }
+
+    // Check if email already exists
+    const existingUser = await pool.query(
+      `SELECT user_id FROM users WHERE email = $1`,
+      [email]
+    );
+
+    if (existingUser.rows.length > 0) {
+      return res.status(409).json({
+        error: 'Email already exists'
+      });
+    }
+
+    const hashedPassword = await bcrypt.hash(password, 10);
+
+    const result = await pool.query(`
+      INSERT INTO users
+      (
+        name,
+        email,
+        password,
+        phone_number,
+        role,
+        address,
+        city,
+        latitude,
+        longitude,
+        profile_image
+      )
+      VALUES
+      ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      RETURNING user_id
+    `, [
+      name,
+      email,
+      hashedPassword,
+      phone_number || null,
+      role || 'user',
+      address || null,
+      city || null,
+      latitude || null,
+      longitude || null,
+      profile_image || null
+    ]);
+
+    res.status(201).json({
+      message: 'User registered successfully',
+      user_id: result.rows[0].user_id
+    });
+
   } catch (err) {
-    res.status(400).json({ error: 'Registration failed', details: err.message });
+    console.error('Register error:', err);
+
+    res.status(500).json({
+      error: 'Registration failed'
+    });
   }
 });
 
+
+// =========================
+// LOGIN
+// =========================
 router.post('/login', async (req, res) => {
-  const { email, password } = req.body;
 
   try {
-    const stmt = db.prepare(`SELECT * FROM users WHERE email = ?`);
-    const user = stmt.get(email);
+
+    const { email, password } = req.body;
+
+    const result = await pool.query(`
+      SELECT *
+      FROM users
+      WHERE email = $1
+    `, [email]);
+
+    const user = result.rows[0];
 
     if (!user) {
-      console.log('User not found for email:', email);
-      return res.status(401).json({ error: 'Invalid credentials' });
+      return res.status(401).json({
+        error: 'Invalid credentials'
+      });
     }
 
-    const isPasswordMatch = await bcrypt.compare(password, user.password);
+    const isPasswordMatch = await bcrypt.compare(
+      password,
+      user.password
+    );
+
     if (!isPasswordMatch) {
-      console.log('Password mismatch for user:', user.email);
-      return res.status(401).json({ error: 'Invalid credentials' });
+      return res.status(401).json({
+        error: 'Invalid credentials'
+      });
     }
 
-    const { password: _, ...userData } = user;
+    // Check responder assignment
+    let is_assigned = false;
 
+    if (user.role === 'responder') {
+
+      const assignedResult = await pool.query(`
+        SELECT COUNT(*)::INTEGER AS assigned
+        FROM incident_report
+        WHERE responder_id = $1
+        AND is_assigned = 1
+      `, [user.user_id]);
+
+      is_assigned =
+        assignedResult.rows[0].assigned > 0;
+    }
+
+    // Generate JWT
     const accessToken = jwt.sign(
-      { id: user.user_id, role: user.role },
+      {
+        id: user.user_id,
+        role: user.role
+      },
       ACCESS_TOKEN_SECRET,
-      { expiresIn: '15m' }
+      {
+        expiresIn: '15m'
+      }
     );
 
     const refreshToken = jwt.sign(
-      { id: user.user_id, role: user.role },
+      {
+        id: user.user_id,
+        role: user.role
+      },
       REFRESH_TOKEN_SECRET,
-      { expiresIn: '7d' }
+      {
+        expiresIn: '7d'
+      }
     );
 
     refreshTokens.add(refreshToken);
+
+    // Remove password from response
+    delete user.password;
 
     res.json({
       message: 'Login successful',
       accessToken,
       refreshToken,
-      user: userData
+      user: {
+        ...user,
+        is_assigned
+      }
     });
+
   } catch (err) {
     console.error('Login error:', err);
-    console.log('JWT_SECRET:', process.env.JWT_SECRET);
-    console.log('JWT_SECRET:', process.env.JWT_REFRESH_SECRET);
-    res.status(500).json({ error: 'Login failed' });
+
+    res.status(500).json({
+      error: 'Login failed'
+    });
   }
 });
 
 
-// REFRESH TOKEN
-router.post('/token', (req, res) => {
-  const { token } = req.body;
-  if (!token || !refreshTokens.has(token)) {
-    return res.status(403).json({ error: 'Refresh token invalid or missing' });
+// =========================
+// GET NEAREST RESPONDERS
+// =========================
+router.get('/responders', async (req, res) => {
+
+  const {
+    lat,
+    lng,
+    limit = 10
+  } = req.query;
+
+  if (!lat || !lng) {
+    return res.status(400).json({
+      error: 'Missing coordinates'
+    });
   }
 
   try {
-    const payload = jwt.verify(token, REFRESH_TOKEN_SECRET);
-    const accessToken = jwt.sign(
-      { id: payload.id, role: payload.role },
-      ACCESS_TOKEN_SECRET,
-      { expiresIn: '15m' }
-    );
-    res.json({ accessToken });
+
+    const result = await pool.query(`
+      SELECT
+        user_id,
+        name,
+        address,
+        city,
+        latitude,
+        longitude,
+
+        (
+          (latitude - $1) * (latitude - $1)
+          +
+          (longitude - $2) * (longitude - $2)
+        ) AS distance
+
+      FROM users
+
+      WHERE role = 'responder'
+      AND latitude IS NOT NULL
+      AND longitude IS NOT NULL
+
+      ORDER BY distance ASC
+
+      LIMIT $3
+    `, [
+      lat,
+      lng,
+      limit
+    ]);
+
+    res.json(result.rows);
+
   } catch (err) {
-    res.status(403).json({ error: 'Invalid refresh token' });
+    console.error('Fetch responders error:', err);
+
+    res.status(500).json({
+      error: 'Failed to get responders'
+    });
   }
 });
 
-// LOGOUT
-router.post('/logout', (req, res) => {
+
+// =========================
+// GET RESPONDER BY ID
+// =========================
+router.get('/responders/:id', async (req, res) => {
+
+  const { id } = req.params;
+
+  try {
+
+    const result = await pool.query(`
+      SELECT
+        user_id,
+        name,
+        phone_number,
+        address,
+        city,
+        latitude,
+        longitude,
+        profile_image
+
+      FROM users
+
+      WHERE user_id = $1
+      AND role = 'responder'
+    `, [id]);
+
+    const responder = result.rows[0];
+
+    if (!responder) {
+      return res.status(404).json({
+        error: 'Responder not found'
+      });
+    }
+
+    res.json(responder);
+
+  } catch (err) {
+    console.error('Get responder error:', err);
+
+    res.status(500).json({
+      error: 'Failed to get responder'
+    });
+  }
+});
+
+
+// =========================
+// GET AUTHORITIES
+// =========================
+router.get('/authorities', async (req, res) => {
+
+  const {
+    lat,
+    lng,
+    limit = 10
+  } = req.query;
+
+  if (!lat || !lng) {
+    return res.status(400).json({
+      error: 'Missing coordinates'
+    });
+  }
+
+  try {
+
+    const result = await pool.query(`
+      SELECT
+        user_id,
+        name,
+        address,
+        city,
+        latitude,
+        longitude,
+
+        (
+          (latitude - $1) * (latitude - $1)
+          +
+          (longitude - $2) * (longitude - $2)
+        ) AS distance
+
+      FROM users
+
+      WHERE role = 'authority'
+      AND latitude IS NOT NULL
+      AND longitude IS NOT NULL
+
+      ORDER BY distance ASC
+
+      LIMIT $3
+    `, [
+      lat,
+      lng,
+      limit
+    ]);
+
+    res.json(result.rows);
+
+  } catch (err) {
+    console.error('Fetch authorities error:', err);
+
+    res.status(500).json({
+      error: 'Failed to get authorities'
+    });
+  }
+});
+
+
+// =========================
+// REFRESH TOKEN
+// =========================
+router.post('/token', (req, res) => {
+
   const { token } = req.body;
+
+  if (!token || !refreshTokens.has(token)) {
+    return res.status(403).json({
+      error: 'Refresh token invalid or missing'
+    });
+  }
+
+  try {
+
+    const payload = jwt.verify(
+      token,
+      REFRESH_TOKEN_SECRET
+    );
+
+    const accessToken = jwt.sign(
+      {
+        id: payload.id,
+        role: payload.role
+      },
+      ACCESS_TOKEN_SECRET,
+      {
+        expiresIn: '15m'
+      }
+    );
+
+    res.json({
+      accessToken
+    });
+
+  } catch (err) {
+
+    res.status(403).json({
+      error: 'Invalid refresh token'
+    });
+  }
+});
+
+
+// =========================
+// LOGOUT
+// =========================
+router.post('/logout', (req, res) => {
+
+  const { token } = req.body;
+
   refreshTokens.delete(token);
-  res.json({ message: 'Logged out' });
+
+  res.json({
+    message: 'Logged out'
+  });
 });
 
 module.exports = router;

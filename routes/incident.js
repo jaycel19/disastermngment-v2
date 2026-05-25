@@ -1,70 +1,343 @@
 const express = require('express');
-const multer = require('multer');
-const ffmpeg = require('fluent-ffmpeg');
-const fs = require('fs');
-const path = require('path');
-const db = require('../db');
+const router = express.Router();
+
+const pool = require('../db');
+
 const authenticateToken = require('../middleware/auth');
 
-const router = express.Router();
-const upload = multer({ dest: 'uploads/' });
+const {
+  notifyAuthorities,
+  sendExpoPushNotification
+} = require('../utils/pushNotifHelper');
 
-// Upload and compress video/image
-router.post('/incident', authenticateToken, upload.fields([
-  { name: 'video', maxCount: 1 },
-  { name: 'photo', maxCount: 1 }
-]), async (req, res) => {
-  const { user_id, incident_type, description, location, date_time, status } = req.body;
-  const photoFile = req.files['photo']?.[0];
-  const videoFile = req.files['video']?.[0];
-  let videoPath = '';
-  let photoPath = '';
+// CREATE incident
+router.post('/incident', authenticateToken, async (req, res) => {
+  try {
+
+    const user_id = req.user.id;
+
+    const {
+      group_id,
+      incident_type,
+      description,
+      location,
+      latitude,
+      longitude,
+      date_time,
+      status,
+      photo,
+      video,
+      video_thumbnail
+    } = req.body;
+
+    const result = await pool.query(`
+      INSERT INTO incident_report
+      (
+        user_id,
+        group_id,
+        incident_type,
+        description,
+        location,
+        latitude,
+        longitude,
+        date_time,
+        status,
+        photo,
+        video,
+        video_thumbnail
+      )
+      VALUES
+      (
+        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12
+      )
+      RETURNING report_id
+    `, [
+      user_id,
+      group_id,
+      incident_type,
+      description,
+      location,
+      latitude,
+      longitude,
+      date_time || new Date(),
+      status || 'pending',
+      photo || null,
+      video || null,
+      video_thumbnail || null
+    ]);
+
+    const report_id = result.rows[0].report_id;
+
+    // Notify authorities
+    await notifyAuthorities({
+      report_id,
+      group_id,
+      incident_type,
+      location,
+      latitude: parseFloat(latitude),
+      longitude: parseFloat(longitude),
+      status: status || 'pending'
+    });
+
+    res.status(201).json({
+      message: 'Incident report created',
+      report_id
+    });
+
+  } catch (err) {
+
+    console.error('Create incident error:', err);
+
+    res.status(500).json({
+      error: 'Failed to create incident'
+    });
+  }
+});
+
+// GET incidents for joined groups
+router.get('/incident', authenticateToken, async (req, res) => {
 
   try {
-    // Move image to permanent location
-    if (photoFile) {
-      const targetPath = `uploads/${Date.now()}_${photoFile.originalname}`;
-      fs.renameSync(photoFile.path, targetPath);
-      photoPath = targetPath;
-    }
 
-    // Compress video
-    if (videoFile) {
-      const compressedName = `compressed_${Date.now()}.mp4`;
-      const outputPath = `uploads/${compressedName}`;
+    const user_id = req.user.id;
 
-      await new Promise((resolve, reject) => {
-        ffmpeg(videoFile.path)
-          .outputOptions(['-vcodec libx264', '-crf 28'])
-          .on('end', () => {
-            fs.unlinkSync(videoFile.path); // delete original
-            resolve();
-          })
-          .on('error', reject)
-          .save(outputPath);
-      });
+    const page = parseInt(req.query.page, 10) || 1;
 
-      const stats = fs.statSync(outputPath);
-      if (stats.size > 150 * 1024 * 1024) {
-        fs.unlinkSync(outputPath);
-        return res.status(400).json({ error: 'Compressed video exceeds 150MB limit.' });
-      }
+    const perPage = 10;
 
-      videoPath = outputPath;
-    }
+    const offset = (page - 1) * perPage;
 
-    const stmt = db.prepare(`
-      INSERT INTO incident_report (
-        user_id, incident_type, description, location, date_time, status, photo, video
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-    `);
+    const result = await pool.query(`
+      SELECT
+        ir.*,
+        cg.group_name AS community_name,
+        u.name AS username,
+        u.profile_image
 
-    stmt.run(user_id, incident_type, description, location, date_time, status || 'pending', photoPath, videoPath);
+      FROM incident_report ir
 
-    res.status(201).json({ message: 'Incident report created', video: videoPath, photo: photoPath });
+      JOIN community_group cg
+      ON ir.group_id = cg.group_id
+
+      JOIN users u
+      ON ir.user_id = u.user_id
+
+      WHERE ir.group_id IN (
+        SELECT group_id
+        FROM group_membership
+        WHERE user_id = $1
+      )
+
+      ORDER BY
+        CASE
+          WHEN ir.status = 'active' THEN 0
+          WHEN ir.status = 'pending' THEN 1
+          WHEN ir.status = 'resolved' THEN 2
+          ELSE 3
+        END,
+        ir.date_time DESC
+
+      LIMIT $2
+      OFFSET $3
+    `, [
+      user_id,
+      perPage,
+      offset
+    ]);
+
+    res.json(result.rows);
+
   } catch (err) {
-    console.error(err);
-    res.status(500).json({ error: 'Failed to upload and save incident.' });
+
+    console.error('Fetch incidents error:', err);
+
+    res.status(500).json({
+      error: 'Failed to retrieve incident reports'
+    });
+  }
+});
+
+// GET single incident
+router.get('/incident/:id', async (req, res) => {
+
+  const { id } = req.params;
+
+  try {
+
+    const result = await pool.query(`
+      SELECT
+        ir.*,
+        cg.group_name,
+        u.name AS username,
+        u.profile_image
+
+      FROM incident_report ir
+
+      JOIN community_group cg
+      ON ir.group_id = cg.group_id
+
+      JOIN users u
+      ON ir.user_id = u.user_id
+
+      WHERE ir.report_id = $1
+    `, [id]);
+
+    const report = result.rows[0];
+
+    if (!report) {
+      return res.status(404).json({
+        error: 'Report not found'
+      });
+    }
+
+    res.json(report);
+
+  } catch (err) {
+
+    console.error('Fetch incident detail error:', err);
+
+    res.status(500).json({
+      error: 'Failed to fetch report detail'
+    });
+  }
+});
+
+// ASSIGN responder
+router.post('/incident/:id/assign', async (req, res) => {
+
+  const { id } = req.params;
+
+  const { responder_id } = req.body;
+
+  if (!responder_id) {
+    return res.status(400).json({
+      error: 'Missing responder_id'
+    });
+  }
+
+  try {
+
+    // Assign responder
+    const assignResult = await pool.query(`
+      UPDATE incident_report
+      SET
+        responder_id = $1,
+        is_assigned = 1
+      WHERE report_id = $2
+      RETURNING *
+    `, [
+      responder_id,
+      id
+    ]);
+
+    const incident = assignResult.rows[0];
+
+    if (!incident) {
+      return res.status(404).json({
+        error: 'Incident not found'
+      });
+    }
+
+    // Get responder
+    const responderResult = await pool.query(`
+      SELECT *
+      FROM users
+      WHERE user_id = $1
+    `, [responder_id]);
+
+    const responder = responderResult.rows[0];
+
+    if (responder?.expo_push_token) {
+
+      const title = '📍 You have been assigned to a new incident';
+
+      const body = `Location: ${incident.location}`;
+
+      const dataPayload = {
+        navigateTo: 'Alerts',
+        report_id: incident.report_id,
+        location: incident.location,
+        incident_type: incident.incident_type,
+        status: 'assigned',
+        assigned_to_responder_id: responder.user_id
+      };
+
+      await sendExpoPushNotification(
+        responder.expo_push_token,
+        title,
+        body,
+        dataPayload
+      );
+
+      await pool.query(`
+        INSERT INTO notifications
+        (
+          user_id,
+          report_id,
+          title,
+          body,
+          data
+        )
+        VALUES ($1,$2,$3,$4,$5)
+      `, [
+        responder.user_id,
+        incident.report_id,
+        title,
+        body,
+        JSON.stringify(dataPayload)
+      ]);
+    }
+
+    res.json({
+      message: 'Responder assigned and notified successfully'
+    });
+
+  } catch (err) {
+
+    console.error('Assign responder error:', err);
+
+    res.status(500).json({
+      error: 'Failed to assign responder'
+    });
+  }
+});
+
+// GET incidents by user
+router.get('/incident/user/:user_id', authenticateToken, async (req, res) => {
+
+  const { user_id } = req.params;
+
+  try {
+
+    const result = await pool.query(`
+      SELECT
+        ir.*,
+        cg.group_name AS community_name,
+        u.name AS username,
+        u.profile_image
+
+      FROM incident_report ir
+
+      JOIN community_group cg
+      ON ir.group_id = cg.group_id
+
+      JOIN users u
+      ON ir.user_id = u.user_id
+
+      WHERE ir.user_id = $1
+
+      ORDER BY ir.date_time DESC
+    `, [user_id]);
+
+    res.json(result.rows);
+
+  } catch (err) {
+
+    console.error('Fetch user incidents error:', err);
+
+    res.status(500).json({
+      error: 'Failed to fetch submitted reports'
+    });
   }
 });
 
