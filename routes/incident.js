@@ -2,7 +2,8 @@ const express = require('express');
 const router = express.Router();
 
 const pool = require('../db');
-
+const multer = require('multer');
+const cloudinary = require('../utils/cloudinary');
 const authenticateToken = require('../middleware/auth');
 
 const {
@@ -11,29 +12,21 @@ const {
 } = require('../utils/pushNotifHelper');
 
 // CREATE incident
-router.post('/incident', authenticateToken, async (req, res) => {
-  try {
+router.post(
+  '/incident',
+  authenticateToken,
+  upload.fields([
+    { name: 'photo', maxCount: 1 },
+    { name: 'video', maxCount: 1 },
+    { name: 'video_thumbnail', maxCount: 1 },
+  ]),
+  async (req, res) => {
 
-    const user_id = req.user.id;
+    try {
 
-    const {
-      group_id,
-      incident_type,
-      description,
-      location,
-      latitude,
-      longitude,
-      date_time,
-      status,
-      photo,
-      video,
-      video_thumbnail
-    } = req.body;
+      const user_id = req.user.id;
 
-    const result = await pool.query(`
-      INSERT INTO incident_report
-      (
-        user_id,
+      const {
         group_id,
         incident_type,
         description,
@@ -42,57 +35,145 @@ router.post('/incident', authenticateToken, async (req, res) => {
         longitude,
         date_time,
         status,
-        photo,
-        video,
-        video_thumbnail
-      )
-      VALUES
-      (
-        $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12
-      )
-      RETURNING report_id
-    `, [
-      user_id,
-      group_id,
-      incident_type,
-      description,
-      location,
-      latitude,
-      longitude,
-      date_time || new Date(),
-      status || 'pending',
-      photo || null,
-      video || null,
-      video_thumbnail || null
-    ]);
+      } = req.body;
 
-    const report_id = result.rows[0].report_id;
+      let photoUrl = null;
+      let videoUrl = null;
+      let thumbnailUrl = null;
 
-    // Notify authorities
-    await notifyAuthorities({
-      report_id,
-      group_id,
-      incident_type,
-      location,
-      latitude: parseFloat(latitude),
-      longitude: parseFloat(longitude),
-      status: status || 'pending'
-    });
+      // =========================
+      // Upload Photo
+      // =========================
+      if (req.files?.photo?.[0]) {
 
-    res.status(201).json({
-      message: 'Incident report created',
-      report_id
-    });
+        const photoFile = req.files.photo[0];
 
-  } catch (err) {
+        const base64Photo =
+          `data:${photoFile.mimetype};base64,${photoFile.buffer.toString('base64')}`;
 
-    console.error('Create incident error:', err);
+        const uploadedPhoto = await cloudinary.uploader.upload(
+          base64Photo,
+          {
+            folder: 'disaster-management/incidents/photos',
+          }
+        );
 
-    res.status(500).json({
-      error: 'Failed to create incident'
-    });
+        photoUrl = uploadedPhoto.secure_url;
+      }
+
+      // =========================
+      // Upload Video
+      // =========================
+      if (req.files?.video?.[0]) {
+
+        const videoFile = req.files.video[0];
+
+        const base64Video =
+          `data:${videoFile.mimetype};base64,${videoFile.buffer.toString('base64')}`;
+
+        const uploadedVideo = await cloudinary.uploader.upload(
+          base64Video,
+          {
+            resource_type: 'video',
+            folder: 'disaster-management/incidents/videos',
+          }
+        );
+
+        videoUrl = uploadedVideo.secure_url;
+      }
+
+      // =========================
+      // Upload Thumbnail
+      // =========================
+      if (req.files?.video_thumbnail?.[0]) {
+
+        const thumbFile = req.files.video_thumbnail[0];
+
+        const base64Thumb =
+          `data:${thumbFile.mimetype};base64,${thumbFile.buffer.toString('base64')}`;
+
+        const uploadedThumb = await cloudinary.uploader.upload(
+          base64Thumb,
+          {
+            folder: 'disaster-management/incidents/thumbnails',
+          }
+        );
+
+        thumbnailUrl = uploadedThumb.secure_url;
+      }
+
+      // =========================
+      // Save Incident
+      // =========================
+      const result = await pool.query(`
+        INSERT INTO incident_report
+        (
+          user_id,
+          group_id,
+          incident_type,
+          description,
+          location,
+          latitude,
+          longitude,
+          date_time,
+          status,
+          photo,
+          video,
+          video_thumbnail
+        )
+        VALUES
+        (
+          $1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12
+        )
+        RETURNING report_id
+      `, [
+        user_id,
+        group_id || null,
+        incident_type,
+        description,
+        location,
+        latitude,
+        longitude,
+        date_time || new Date(),
+        status || 'pending',
+        photoUrl,
+        videoUrl,
+        thumbnailUrl
+      ]);
+
+      const report_id = result.rows[0].report_id;
+
+      // =========================
+      // Notify Authorities
+      // =========================
+      await notifyAuthorities({
+        report_id,
+        group_id,
+        incident_type,
+        location,
+        latitude: parseFloat(latitude),
+        longitude: parseFloat(longitude),
+        status: status || 'pending'
+      });
+
+      res.status(201).json({
+        message: 'Incident report created',
+        report_id,
+        photo: photoUrl,
+        video: videoUrl,
+        video_thumbnail: thumbnailUrl
+      });
+
+    } catch (err) {
+
+      console.error('Create incident error:', err);
+
+      res.status(500).json({
+        error: 'Failed to create incident'
+      });
+    }
   }
-});
+);
 
 // GET incidents for joined groups
 router.get('/incident', authenticateToken, async (req, res) => {
@@ -339,6 +420,10 @@ router.get('/incident/user/:user_id', authenticateToken, async (req, res) => {
       error: 'Failed to fetch submitted reports'
     });
   }
+});
+
+const upload = multer({
+  storage: multer.memoryStorage(),
 });
 
 module.exports = router;
