@@ -13,12 +13,24 @@ const notificationRoutes = require('./routes/notifications');
 const resourcesRoutes = require('./routes/resources');
 const hotlinesRoutes = require('./routes/hotlines');
 
+const {
+  uploadRouter,
+  createRouteHandler,
+} = require('./uploadthing');
+
 app.use(cors({
   origin: '*',
-  credentials: true
+  credentials: true,
 }));
 
 app.use(express.json());
+
+app.use(
+  '/api/uploadthing',
+  createRouteHandler({
+    router: uploadRouter,
+  })
+);
 
 app.use('/api', authRoutes);
 app.use('/api', incidentRoutes);
