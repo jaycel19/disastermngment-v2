@@ -25,7 +25,6 @@ router.post('/register', async (req, res) => {
       phone_number,
       role,
       address,
-      city,
       latitude,
       longitude,
       profile_image
