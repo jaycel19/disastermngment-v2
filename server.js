@@ -7,7 +7,7 @@ dotenv.config();
 const app = express();
 
 const authRoutes = require('./routes/auth');
-const incidentRoutes = require('./routes/incidents');
+const incidentRoutes = require('./routes/incident');
 const groupsRoutes = require('./routes/groups');
 const notificationRoutes = require('./routes/notifications');
 const resourcesRoutes = require('./routes/resources');
