@@ -73,7 +73,6 @@ router.post('/register', async (req, res) => {
       phone_number || null,
       role || 'user',
       address || null,
-      city || null,
       latitude || null,
       longitude || null,
       profile_image || null
