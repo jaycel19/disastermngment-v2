@@ -16,7 +16,7 @@ const hotlinesRoutes = require('./routes/hotlines');
 const {
   uploadRouter,
   createRouteHandler,
-} = require('./uploadthing');
+} = require('./utils/uploadthings');
 
 app.use(cors({
   origin: '*',
