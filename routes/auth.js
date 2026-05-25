@@ -64,7 +64,7 @@ router.post('/register', async (req, res) => {
         profile_image
       )
       VALUES
-      ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+      ($1,$2,$3,$4,$5,$6,$7,$8,$9)
       RETURNING user_id
     `, [
       name,
