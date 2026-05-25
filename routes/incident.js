@@ -11,6 +11,12 @@ const {
   sendExpoPushNotification
 } = require('../utils/pushNotifHelper');
 
+const upload = multer({
+  storage: multer.memoryStorage(),
+});
+
+
+
 // CREATE incident
 router.post(
   '/incident',
@@ -420,10 +426,6 @@ router.get('/incident/user/:user_id', authenticateToken, async (req, res) => {
       error: 'Failed to fetch submitted reports'
     });
   }
-});
-
-const upload = multer({
-  storage: multer.memoryStorage(),
 });
 
 module.exports = router;

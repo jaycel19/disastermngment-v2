@@ -10,6 +10,12 @@ const ACCESS_TOKEN_SECRET = process.env.JWT_SECRET;
 const REFRESH_TOKEN_SECRET = process.env.JWT_REFRESH_SECRET;
 
 const refreshTokens = new Set();
+const multer = require('multer');
+
+const upload = multer({
+  storage: multer.memoryStorage(),
+});
+
 
 
 // =========================
@@ -441,12 +447,6 @@ router.post('/logout', (req, res) => {
   res.json({
     message: 'Logged out'
   });
-});
-
-const multer = require('multer');
-
-const upload = multer({
-  storage: multer.memoryStorage(),
 });
 
 module.exports = router;
