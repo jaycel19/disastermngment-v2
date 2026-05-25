@@ -3,7 +3,7 @@ const router = express.Router();
 
 const pool = require('../db');
 const multer = require('multer');
-const cloudinary = require('../utils/cloudinary');
+const cloudinary = require('./utils/cloudinary');
 const authenticateToken = require('../middleware/auth');
 
 const {
