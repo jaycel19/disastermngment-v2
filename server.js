@@ -14,7 +14,7 @@ const resourcesRoutes = require('./routes/resources');
 const hotlinesRoutes = require('./routes/hotlines');
 const multer = require('multer');
 const streamifier = require('streamifier');
-const cloudinary = require('../utils/cloudinary');
+const cloudinary = require('./utils/cloudinary');
 
 const upload = multer({
   storage: multer.memoryStorage(),
