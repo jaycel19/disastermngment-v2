@@ -51,8 +51,19 @@ async function notifyAuthorities({
   latitude,
   longitude,
   report_id,
-  status
+  status,
+  user_id
 }) {
+
+  // GET REPORTER INFO
+  const reporterResult = await pool.query(`
+    SELECT name
+    FROM users
+    WHERE user_id = $1
+  `, [user_id]);
+
+  const reporterName =
+    reporterResult.rows[0]?.name || 'Unknown Reporter';
 
   const authorities = await getAuthoritiesToNotify(
     group_id,
@@ -62,14 +73,24 @@ async function notifyAuthorities({
 
   const title = '🚨 New Incident Alert';
 
-  const body = `${incident_type} at ${location}`;
+  const body =
+    `${reporterName} reported a ${incident_type}`;
 
+  // IMPORTANT
   const dataPayload = {
     navigateTo: 'Alerts',
-    location,
-    incident_type,
+
+    notification_id: report_id,
+
     report_id,
-    status
+
+    reporter_name: reporterName,
+
+    location,
+
+    incident_type,
+
+    status,
   };
 
   for (const authority of authorities) {

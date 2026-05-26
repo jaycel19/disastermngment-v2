@@ -152,6 +152,15 @@ router.post(
       // =========================
       // Notify Authorities
       // =========================
+      const userResult = await pool.query(`
+        SELECT name
+        FROM users
+        WHERE user_id = $1
+      `, [user_id]);
+
+      const reporter_name =
+        userResult.rows[0]?.name ||
+        'Unknown Reporter';
       await notifyAuthorities({
         report_id,
         group_id,
@@ -159,7 +168,9 @@ router.post(
         location,
         latitude: parseFloat(latitude),
         longitude: parseFloat(longitude),
-        status: status || 'pending'
+        status: status || 'pending',
+
+        reporter_name,
       });
 
       res.status(201).json({
