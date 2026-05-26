@@ -168,7 +168,7 @@ router.post('/login', async (req, res) => {
         SELECT COUNT(*)::INTEGER AS assigned
         FROM incident_report
         WHERE responder_id = $1
-        AND is_assigned = 1
+        AND is_assigned
       `, [user.user_id]);
 
       is_assigned =
