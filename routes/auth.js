@@ -247,7 +247,6 @@ router.get('/responders', async (req, res) => {
         user_id,
         name,
         address,
-        city,
         latitude,
         longitude,
 
@@ -299,7 +298,6 @@ router.get('/responders/:id', async (req, res) => {
         name,
         phone_number,
         address,
-        city,
         latitude,
         longitude,
         profile_image
@@ -354,7 +352,6 @@ router.get('/authorities', async (req, res) => {
         user_id,
         name,
         address,
-        city,
         latitude,
         longitude,
 
