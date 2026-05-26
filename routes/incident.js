@@ -162,15 +162,14 @@ router.post(
         userResult.rows[0]?.name ||
         'Unknown Reporter';
       await notifyAuthorities({
+        user_id,
         report_id,
         group_id,
         incident_type,
         location,
         latitude: parseFloat(latitude),
         longitude: parseFloat(longitude),
-        status: status || 'pending',
-
-        reporter_name,
+        status: status || 'pending'
       });
 
       res.status(201).json({
