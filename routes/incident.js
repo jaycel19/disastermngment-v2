@@ -363,7 +363,7 @@ router.post('/incident/:id/assign', async (req, res) => {
         status: 'assigned',
         assigned_to_responder_id: responder.user_id
       };
-
+      
       await sendExpoPushNotification(
         responder.expo_push_token,
         title,
@@ -378,15 +378,17 @@ router.post('/incident/:id/assign', async (req, res) => {
           report_id,
           title,
           body,
-          data
+          data,
+          assigned_to_responder_id
         )
-        VALUES ($1,$2,$3,$4,$5)
+        VALUES ($1,$2,$3,$4,$5,$6)
       `, [
         responder.user_id,
         incident.report_id,
         title,
         body,
-        JSON.stringify(dataPayload)
+        JSON.stringify(dataPayload),
+        responder.user_id
       ]);
     }
 

@@ -22,6 +22,7 @@ router.get(
       const result = await pool.query(`
         SELECT
           n.id,
+          n.user_id,
           n.report_id,
           n.title,
           n.body,
@@ -33,16 +34,24 @@ router.get(
           ir.location,
           ir.status,
           ir.responder_id,
+          ir.latitude,
+          ir.longitude,
 
-          u.name AS reporter_name
+          reporter.user_id AS reporter_id,
+          reporter.name AS reporter_name,
+
+          responder.name AS responder_name
 
         FROM notifications n
 
         LEFT JOIN incident_report ir
           ON n.report_id = ir.report_id
 
-        LEFT JOIN users u
-          ON ir.user_id = u.user_id
+        LEFT JOIN users reporter
+          ON ir.user_id = reporter.user_id
+
+        LEFT JOIN users responder
+          ON ir.responder_id = responder.user_id
 
         WHERE n.user_id = $1
 
@@ -63,12 +72,81 @@ router.get(
 
           } catch (e) {
 
+            console.error(
+              'Notification parse error:',
+              e
+            );
+
             parsedData = {};
           }
+
+          // FINAL NORMALIZED PAYLOAD
+          const normalizedData = {
+
+            // preserve original payload
+            ...parsedData,
+
+            // ALWAYS use latest DB values
+            report_id:
+              row.report_id,
+
+            reporter_id:
+              row.reporter_id || null,
+
+            reporter_name:
+              row.reporter_name ||
+              parsedData.reporter_name ||
+              'Unknown Reporter',
+
+            responder_name:
+              row.responder_name ||
+              parsedData.responder_name ||
+              null,
+
+            location:
+              row.location ||
+              parsedData.location ||
+              'Unknown Location',
+
+            incident_type:
+              row.incident_type ||
+              parsedData.incident_type ||
+              'Incident',
+
+            status:
+              row.status ||
+              parsedData.status ||
+              'pending',
+
+            latitude:
+              row.latitude ||
+              parsedData.latitude ||
+              null,
+
+            longitude:
+              row.longitude ||
+              parsedData.longitude ||
+              null,
+
+            // IMPORTANT:
+            // this determines if responder
+            // should see the notification
+            assigned_to_responder_id:
+              row.responder_id ||
+              parsedData.assigned_to_responder_id ||
+              null,
+
+            navigateTo:
+              parsedData.navigateTo ||
+              'Alerts',
+          };
 
           return {
 
             id: row.id,
+
+            user_id:
+              row.user_id,
 
             report_id:
               row.report_id,
@@ -80,42 +158,13 @@ router.get(
               row.body,
 
             is_read:
-              row.is_read,
+              Boolean(row.is_read),
 
             created_at:
               row.created_at,
 
-            data: {
-
-              // preserve old payload
-              ...parsedData,
-
-              // overwrite with latest DB values
-              reporter_name:
-                row.reporter_name ||
-                parsedData.reporter_name ||
-                'Unknown Reporter',
-
-              location:
-                row.location ||
-                parsedData.location ||
-                'Unknown Location',
-
-              incident_type:
-                row.incident_type ||
-                parsedData.incident_type ||
-                'Incident',
-
-              status:
-                row.status ||
-                parsedData.status ||
-                'pending',
-
-              assigned_to_responder_id:
-                row.responder_id ||
-                parsedData.assigned_to_responder_id ||
-                null,
-            },
+            data:
+              normalizedData,
           };
         });
 
@@ -178,6 +227,7 @@ router.post(
       }
 
       res.json({
+        success: true,
         message:
           'Notification marked as read'
       });
