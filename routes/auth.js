@@ -331,6 +331,7 @@ router.get('/responders/:id', async (req, res) => {
 // =========================
 // GET AUTHORITIES
 // =========================
+
 router.get('/authorities', async (req, res) => {
 
   const {
@@ -346,6 +347,12 @@ router.get('/authorities', async (req, res) => {
   }
 
   try {
+
+    const latitude = parseFloat(lat);
+
+    const longitude = parseFloat(lng);
+
+    const limitValue = parseInt(limit);
 
     const result = await pool.query(`
       SELECT
@@ -371,22 +378,25 @@ router.get('/authorities', async (req, res) => {
 
       LIMIT $3
     `, [
-      lat,
-      lng,
-      limit
+      latitude,
+      longitude,
+      limitValue
     ]);
 
     res.json(result.rows);
 
   } catch (err) {
-    console.error('Fetch authorities error:', err);
+
+    console.error(
+      'Fetch authorities error:',
+      err
+    );
 
     res.status(500).json({
       error: 'Failed to get authorities'
     });
   }
 });
-
 
 // =========================
 // REFRESH TOKEN
