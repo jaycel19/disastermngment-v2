@@ -264,16 +264,18 @@ router.get('/incident/:id', async (req, res) => {
     const result = await pool.query(`
       SELECT
         ir.*,
+
         cg.group_name,
-        u.name AS username,
+
+        u.name AS reporter_name,
         u.profile_image
 
       FROM incident_report ir
 
-      JOIN community_group cg
+      LEFT JOIN community_group cg
       ON ir.group_id = cg.group_id
 
-      JOIN users u
+      LEFT JOIN users u
       ON ir.user_id = u.user_id
 
       WHERE ir.report_id = $1
@@ -291,7 +293,10 @@ router.get('/incident/:id', async (req, res) => {
 
   } catch (err) {
 
-    console.error('Fetch incident detail error:', err);
+    console.error(
+      'Fetch incident detail error:',
+      err
+    );
 
     res.status(500).json({
       error: 'Failed to fetch report detail'
