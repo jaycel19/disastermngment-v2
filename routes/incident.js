@@ -309,7 +309,7 @@ router.post('/incident/:id/assign', async (req, res) => {
       UPDATE incident_report
       SET
         responder_id = $1,
-        is_assigned = 1
+        is_assigned = true
       WHERE report_id = $2
       RETURNING *
     `, [

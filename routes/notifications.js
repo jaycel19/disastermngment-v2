@@ -65,7 +65,7 @@ router.post('/notifications/:id/read', authenticateToken, async (req, res) => {
 
     const result = await pool.query(`
       UPDATE notifications
-      SET is_read = 1
+      SET is_read = true
       WHERE id = $1
       AND user_id = $2
       RETURNING id
